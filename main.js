@@ -35,11 +35,6 @@ function createPlayerSVG(avatarUrl) {
     const avatarX = (size - avatarSize) / 2;
     const avatarY = 10;
 
-    // Use a CORS-compatible proxy for the avatar image if available, or just the URL
-    // This is necessary to draw the external image onto the canvas via the SVG.
-    const proxiedAvatarUrl = `https://cors-anywhere.herokuapp.com/${avatarUrl}`;
-
-
     return `
     <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
         <defs>
@@ -65,27 +60,46 @@ function createPlayerSVG(avatarUrl) {
 
 async function loadPlayerAsset() {
     try {
-        // This feature requires websim.
         if (!window.websim) {
              throw new Error("websim client not found");
         }
         const user = await window.websim.getCurrentUser();
         if (user && user.avatar_url) {
-            const svgString = createPlayerSVG(user.avatar_url);
-            const svgUrl = "data:image/svg+xml;base64," + btoa(svgString);
+            // To avoid canvas tainting from cross-origin images, we fetch the avatar,
+            // convert it to a Blob, and then create a local URL for it.
+            const response = await fetch(user.avatar_url);
+            if (!response.ok) throw new Error('Avatar fetch failed');
+            const blob = await response.blob();
+            const avatarObjectUrl = URL.createObjectURL(blob);
+
+            const svgString = createPlayerSVG(avatarObjectUrl);
+            const svgBlob = new Blob([svgString], {type: 'image/svg+xml'});
+            const svgObjectUrl = URL.createObjectURL(svgBlob);
             
+            // The object URLs should be revoked after the image loads to free up memory.
+            const cleanup = () => {
+                URL.revokeObjectURL(avatarObjectUrl);
+                URL.revokeObjectURL(svgObjectUrl);
+                playerImg.removeEventListener('load', cleanup);
+                playerImg.removeEventListener('error', cleanup);
+            };
+
             return new Promise((resolve) => {
-                playerImg.onload = resolve;
-                playerImg.onerror = () => { // Fallback on SVG load error
+                playerImg.addEventListener('load', () => {
+                    cleanup();
+                    resolve();
+                });
+                playerImg.addEventListener('error', () => {
+                    cleanup();
                     console.warn("Failed to load SVG character, using default.");
-                    playerImg.src = 'player.png';
-                    playerImg.onload = resolve;
-                };
-                playerImg.src = svgUrl;
+                    playerImg.src = 'player.png'; // Set fallback
+                    playerImg.onload = resolve; // Resolve on fallback load
+                });
+                playerImg.src = svgObjectUrl;
             });
         }
     } catch (error) {
-        console.warn("Could not get user data, using default player asset.", error);
+        console.warn("Could not get user data or process avatar, using default player asset.", error);
     }
 
     // Fallback for no user, no avatar, or API errors
