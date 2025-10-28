@@ -30,6 +30,8 @@ platformImg.src = 'platform.png';
 const controls = new Controls();
 const room = new WebsimSocket();
 
+let playerAvatarLoaded = false;
+
 function createPlayerSVG(avatarUrl) {
     const size = 64; // SVG size
     const avatarSize = 24; // Circle for avatar
@@ -85,6 +87,7 @@ async function loadPlayerAsset() {
             return new Promise((resolve) => {
                 playerImg.addEventListener('load', () => {
                     cleanup();
+                    playerAvatarLoaded = true;
                     resolve();
                 });
                 playerImg.addEventListener('error', () => {
@@ -231,7 +234,10 @@ function gameLoop(timestamp) {
         // Clamp deltaTime to avoid large jumps if tab is inactive for a while
         update(clampedDeltaTime);
         draw();
-        replay.recordFrame(player, platformManager.platforms, cameraY, clampedDeltaTime);
+        // Don't record replay if the player has a custom avatar to avoid complexity.
+        if (!playerAvatarLoaded) {
+            replay.recordFrame(player, platformManager.platforms, cameraY, clampedDeltaTime);
+        }
     } else if (gameState === 'gameOver' && replay.isPlaying) {
         drawReplay(clampedDeltaTime);
     }
@@ -241,6 +247,22 @@ function gameLoop(timestamp) {
 
 async function initializeGame() {
     await room.initialize();
+    
+    // Subscribe to presence updates to ensure we have the user's data.
+    const waitForOwnPresence = new Promise(resolve => {
+        if (room.peers[room.clientId]) {
+            resolve();
+            return;
+        }
+        const unsubscribe = room.subscribePresence(() => {
+            if (room.peers[room.clientId]) {
+                unsubscribe();
+                resolve();
+            }
+        });
+    });
+
+    await waitForOwnPresence;
     await loadPlayerAsset();
     init();
 }
