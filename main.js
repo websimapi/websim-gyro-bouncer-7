@@ -28,6 +28,7 @@ const platformImg = new Image();
 platformImg.src = 'platform.png';
 
 const controls = new Controls();
+const room = new WebsimSocket();
 
 function createPlayerSVG(avatarUrl) {
     const size = 64; // SVG size
@@ -60,14 +61,11 @@ function createPlayerSVG(avatarUrl) {
 
 async function loadPlayerAsset() {
     try {
-        if (!window.websim) {
-             throw new Error("websim client not found");
-        }
-        const user = await window.websim.getCurrentUser();
-        if (user && user.avatar_url) {
+        const currentUser = room.peers[room.clientId];
+        if (currentUser && currentUser.avatarUrl) {
             // To avoid canvas tainting from cross-origin images, we fetch the avatar,
             // convert it to a Blob, and then create a local URL for it.
-            const response = await fetch(user.avatar_url);
+            const response = await fetch(currentUser.avatarUrl);
             if (!response.ok) throw new Error('Avatar fetch failed');
             const blob = await response.blob();
             const avatarObjectUrl = URL.createObjectURL(blob);
@@ -241,12 +239,17 @@ function gameLoop(timestamp) {
     requestAnimationFrame(gameLoop);
 }
 
+async function initializeGame() {
+    await room.initialize();
+    await loadPlayerAsset();
+    init();
+}
+
 startButton.addEventListener('click', async () => {
     try {
         const granted = await controls.requestPermission();
         if (granted) {
-            await loadPlayerAsset();
-            init();
+            await initializeGame();
         } else {
             alert('Motion sensor access is required to play this game.');
         }
